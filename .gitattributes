@@ -1,4 +1,4 @@
 *.sql linguist-language=SQL
 *.py linguist-language=Python
-Resources/* linguist-vendored=false
-SQL-INSERTS/* linguist-vendored
+Resources/* linguist-vendored=true
+SQL-INSERTS/* linguist-vendored=true
