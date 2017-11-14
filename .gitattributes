@@ -1,7 +1,0 @@
-*.sql linguist-language=SQL
-*.py linguist-language=Python
-Resources/* linguist-vendored=true
-SQL-INSERTS/* linguist-vendored=true
-
-project.language       #=> "Python, SQL"
-project.languages      #=> { "SQL" => 119387 }
