@@ -230,7 +230,6 @@ CREATE VIEW ShopSchema.[Shopmans' phone numbers] AS
   (SELECT [Shopman].firstName, [Shopman].lastName, [Shopman].phone
   FROM ShopSchema.Shopman AS [Shopman])
 GO
-
 CREATE VIEW ShopSchema.[Stores' Profit] WITH SCHEMABINDING
   AS
     (SELECT MX.shopName, MAX(MX.maxCost) AS maxSale FROM (SELECT shopName, shopmanCode, maxCost FROM (SELECT C.shopmanCode, MAX(totalCost) AS maxCost
@@ -258,3 +257,90 @@ GO
 
 CREATE UNIQUE CLUSTERED INDEX [Admins_IDX]
   ON ShopSchema.Admins (shopmanCode, shopName)
+
+
+--процедура выборки чеков с определённой даты по сегодняшнюю
+CREATE PROCEDURE ShopSchema.usp_checks_from_data_cursor
+  @date DATE,
+  @checks_cursor CURSOR VARYING OUTPUT
+AS
+  SET @checks_cursor = CURSOR FORWARD_ONLY
+                              STATIC
+  FOR
+  (SELECT [Check].totalCost, [Check].discount, [Shopman].lastName, [Shopman].firstName
+   FROM ShopSchema.[Check] JOIN ShopSchema.[Shopman] ON [Check].shopmanCode = Shopman.shopmanCode
+  WHERE [Check].date BETWEEN @date AND GETDATE())
+  OPEN @checks_cursor
+GO
+
+--процедура выборки чеков с определённой даты по сегодняшнюю с возрастом продавца
+CREATE PROCEDURE ShopSchema.usp_checks_from_data_cursor_withAge
+  @date DATE,
+  @checks_cursor CURSOR VARYING OUTPUT
+AS
+  SET @checks_cursor = CURSOR FORWARD_ONLY
+                              STATIC
+  FOR
+  (SELECT [Check].totalCost, [Check].discount, [Shopman].lastName, [Shopman].firstName, ShopSchema.calculateAge([Shopman].dateOfBirth) AS [AGE]
+   FROM ShopSchema.[Check] JOIN ShopSchema.[Shopman] ON [Check].shopmanCode = Shopman.shopmanCode
+  WHERE [Check].date BETWEEN @date AND GETDATE())
+  OPEN @checks_cursor
+GO
+
+CREATE FUNCTION ShopSchema.fn_full_price (@totalCost MONEY, @discount SMALLINT)
+RETURNS MONEY
+AS
+  BEGIN
+    DECLARE @res MONEY
+    IF (@discount = 0)
+      SET @res = @totalCost
+    ELSE
+      SET @res = @totalCost / (100 - @discount)
+    RETURN @res
+  END
+GO
+
+
+CREATE PROCEDURE ShopSchema.usp_scroll_checks_cursor_by_full_price
+AS
+  DECLARE @checks_autumn_cursor CURSOR
+
+  DECLARE @totalCost INT
+  DECLARE @discount  SMALLINT
+  DECLARE @firstName VARCHAR(25)
+  DECLARE @lastName  VARCHAR(25)
+
+  EXEC ShopSchema.usp_checks_from_data_cursor '2017-09-01', @checks_cursor = @checks_autumn_cursor OUTPUT
+
+  FETCH NEXT FROM @checks_autumn_cursor INTO @totalCost, @discount, @lastName, @firstName
+
+  WHILE (@@FETCH_STATUS = 0)
+  BEGIN
+    IF (ShopSchema.fn_full_price(@totalCost, @discount) BETWEEN 10000 AND 15000)
+      PRINT @lastName + ' ' + @firstName + ' sold on ' + CAST(@totalCost as CHAR)
+    FETCH NEXT FROM @checks_autumn_cursor INTO @totalCost, @discount, @lastName, @firstName
+  END
+  CLOSE @checks_autumn_cursor
+  DEALLOCATE @checks_autumn_cursor
+GO
+
+ShopSchema.usp_scroll_checks_cursor_by_full_price
+
+CREATE FUNCTION ShopSchema.fn_sellers_by_city(@city VARCHAR(50)) RETURNS TABLE
+AS
+  RETURN SELECT S.lastName, S.firstName, Shop.shopName, Shop.shopCode FROM ShopSchema.Shopman AS S JOIN ShopSchema.Shop ON S.shopCode = Shop.shopCode WHERE Shop.city = @city
+GO
+
+CREATE PROCEDURE ShopSchema.usp_checks_from_data_by_city_cursor
+  @date DATE,
+  @checks_cursor CURSOR VARYING OUTPUT
+AS
+  SET @checks_cursor = CURSOR FORWARD_ONLY
+                            STATIC
+  FOR SELECT [Check].totalCost, [Check].discount, [Shopman].lastName, [Shopman].firstName, CITY.shopName AS [AGE]
+  FROM ShopSchema.[Check]
+  JOIN ShopSchema.[Shopman] AS S ON [Check].shopmanCode = Shopman.shopmanCode
+  JOIN ShopSchema.fn_sellers_by_city('Moscow') AS CITY ON S.shopCode = CITY.shopCode
+  WHERE [Check].date BETWEEN @date AND GETDATE()
+  OPEN @checks_cursor
+GO
