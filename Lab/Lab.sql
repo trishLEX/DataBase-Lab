@@ -227,38 +227,34 @@ DROP TABLE ShopSchema.tempItemTable
 GO
 
 CREATE VIEW ShopSchema.[Shopmans' phone numbers] AS
-  SELECT [Shopman].firstName, [Shopman].lastName, [Shopman].phone
-  FROM ShopSchema.Shopman AS [Shopman]
-  WITH CHECK OPTION
+  (SELECT [Shopman].firstName, [Shopman].lastName, [Shopman].phone
+  FROM ShopSchema.Shopman AS [Shopman])
 GO
-
 
 CREATE VIEW ShopSchema.[Stores' Profit] WITH SCHEMABINDING
   AS
-  SELECT MX.shopName, MAX(MX.maxCost) AS maxSale FROM (SELECT shopName, shopmanCode, maxCost FROM (SELECT C.shopmanCode, MAX(totalCost) AS maxCost
+    (SELECT MX.shopName, MAX(MX.maxCost) AS maxSale FROM (SELECT shopName, shopmanCode, maxCost FROM (SELECT C.shopmanCode, MAX(totalCost) AS maxCost
                                                                                                  FROM (SELECT Shopman.shopmanCode, totalCost
                                                                                                        FROM ShopSchema.Shopman JOIN ShopSchema.[Check]
                                                                                                            ON Shopman.shopmanCode = [Check].shopmanCode) AS C
   GROUP BY shopmanCode) AS A
   JOIN ShopSchema.Shop AS B ON
                               exists(SELECT D.shopCode FROM ShopSchema.Shopman AS D WHERE D.shopCode = B.shopCode AND D.shopmanCode = A.shopmanCode))
-  AS MX GROUP BY MX.shopName
-  WITH CHECK OPTION
+  AS MX GROUP BY MX.shopName)
 GO
 
 CREATE INDEX [Shopman_IDX]
-  ON ShopSchema.Shopman (shopmanCode, position, shopCode)
+  ON ShopSchema.Shopman(shopmanCode)
+  INCLUDE (position, shopCode)
 GO
 
 --представление администраторов в каждом магазине
 CREATE VIEW ShopSchema.[Admins] WITH SCHEMABINDING
   AS
-  SELECT shopmanCode ,lastName, firstName, middleName, shopName
+  SELECT shopmanCode, lastName, firstName, middleName, shopName
   FROM ShopSchema.[Shopman] JOIN ShopSchema.[Shop] ON Shopman.shopCode = Shop.shopCode
   WHERE position = 'администратор'
-  WITH CHECK OPTION
 GO
 
 CREATE UNIQUE CLUSTERED INDEX [Admins_IDX]
   ON ShopSchema.Admins (shopmanCode, shopName)
-
