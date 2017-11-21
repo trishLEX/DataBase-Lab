@@ -250,7 +250,7 @@ GO
 --представление администраторов в каждом магазине
 CREATE VIEW ShopSchema.[Admins] WITH SCHEMABINDING
   AS
-  SELECT shopmanCode, lastName, firstName, middleName, shopName
+  SELECT shopmanCode, firstName, lastName, middleName, dateOfBirth, phone, isFired, shopName
   FROM ShopSchema.[Shopman] JOIN ShopSchema.[Shop] ON Shopman.shopCode = Shop.shopCode
   WHERE position = 'администратор'
 GO
@@ -344,3 +344,114 @@ AS
   WHERE [Check].date BETWEEN @date AND GETDATE()
   OPEN @checks_cursor
 GO
+
+
+CREATE TRIGGER ShopSchema.shopman_insert
+ON ShopSchema.Shopman
+AFTER INSERT
+AS
+  IF (exists(SELECT inserted.position FROM inserted WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
+      BEGIN
+        RAISERROR ('Invalid positon', 10, 1)
+        ROLLBACK
+      END
+GO
+
+INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'bellboy', 0)
+GO
+
+
+CREATE TRIGGER ShopSchema.shopman_update
+ON ShopSchema.Shopman
+AFTER UPDATE
+AS
+    IF (exists(SELECT inserted.position FROM inserted WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
+      BEGIN
+        RAISERROR ('Invalid positon', 10, 1)
+        ROLLBACK
+      END
+GO
+
+UPDATE ShopSchema.Shopman SET position = 'администрато' WHERE position = 'администратор'
+GO
+
+
+CREATE TRIGGER ShopSchema.shopman_delete
+ON ShopSchema.Shopman
+AFTER DELETE
+AS
+  PRINT 'rows from shopman was deleted'
+  SELECT * FROM deleted
+GO
+
+INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'администратор', 0)
+DELETE FROM ShopSchema.Shopman WHERE firstName = 'a'
+GO
+
+CREATE TRIGGER ShopSchema.admins_insert
+ON ShopSchema.Admins
+INSTEAD OF INSERT
+AS
+  BEGIN
+  IF (exists(SELECT inserted.shopName FROM inserted WHERE inserted.shopName NOT IN (SELECT Shop.shopName FROM ShopSchema.Shop)))
+      BEGIN
+        RAISERROR ('Invalid shopname', 10, 1)
+        ROLLBACK
+      END
+  IF (exists(SELECT * FROM inserted WHERE exists(SELECT * FROM (ShopSchema.Shopman JOIN ShopSchema.Shop ON Shopman.shopCode = Shop.shopCode AND Shopman.position = 'администратор')
+                                                   WHERE inserted.shopName = Shop.shopName AND Shopman.isFired = 0)))
+        BEGIN
+          RAISERROR ('Attempt to add second administrator in shop', 10, 1)
+          ROLLBACK
+        END
+  ELSE
+      BEGIN
+        INSERT INTO ShopSchema.Shopman SELECT inserted.firstName, inserted.lastName, inserted.middleName, inserted.dateOfBirth, inserted.phone, 'администратор' AS position, 0 AS isFired, (SELECT Shop.shopCode FROM Shop WHERE Shop.shopName = inserted.shopName)
+                                       FROM inserted
+      END
+  END
+GO
+
+INSERT INTO ShopSchema.Admins (firstName, lastName, middleName, dateOfBirth, phone, isFired, shopName)
+    VALUES ('asd', 'cvb', 'asd', '1980-10-10', '89454874529', 0, 'Levi''s store Moscow MEGA Belaya Dacha')
+GO
+
+CREATE TRIGGER ShopSchema.admins_update
+ON ShopSchema.Admins
+INSTEAD OF UPDATE
+AS
+  BEGIN
+    IF (exists(SELECT inserted.shopName FROM inserted WHERE inserted.shopName NOT IN (SELECT Shop.shopName FROM ShopSchema.Shop)))
+    BEGIN
+      RAISERROR ('Invalid shopname', 10, 1)
+      ROLLBACK
+    END
+    ELSE
+      BEGIN
+        IF update(firstName) OR update(lastName) OR update(middleName) OR update(dateOfBirth)
+          BEGIN
+            RAISERROR ('Invalid columns are tried to update', 10, 1)
+            ROLLBACK
+          END
+        ELSE
+          UPDATE ShopSchema.Shopman SET
+            Shopman.phone = (SELECT phone FROM inserted WHERE inserted.shopmanCode = Shopman.shopmanCode),
+            Shopman.isFired = (SELECT isFired FROM inserted WHERE inserted.shopmanCode = Shopman.shopmanCode),
+            Shopman.shopCode = (SELECT shopCode FROM ShopSchema.Shop JOIN inserted ON inserted.shopName = Shop.shopName)
+          WHERE Shopman.shopmanCode = (SELECT shopmanCode FROM inserted WHERE inserted.shopmanCode = Shopman.shopmanCode)
+      END
+  END
+GO
+
+
+UPDATE ShopSchema.Admins SET phone = '89256475648' WHERE shopmanCode = 0
+GO
+
+CREATE TRIGGER ShopSchema.admins_delete
+ON ShopSchema.Admins
+INSTEAD OF DELETE
+AS
+  DELETE FROM Shopman WHERE Shopman.shopmanCode IN (SELECT deleted.shopmanCode FROM deleted)
+GO
+
+DELETE FROM ShopSchema.Admins WHERE firstName = 'asd'
