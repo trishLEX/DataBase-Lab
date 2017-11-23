@@ -193,10 +193,10 @@ SELECT T.itemName, T.Count, T.price * T.Count AS [Total Profit] FROM (SELECT D.i
 GO
 
 --для каждого города указана максимальнеая продажа
-SELECT [SHOPS].city, MAX([SHOPS].maxSale) AS maxSale 
-  FROM (SELECT S.city, R.maxSale 
+SELECT [SHOPS].city, MAX([SHOPS].maxSale) AS maxSale
+  FROM (SELECT S.city, R.maxSale
         FROM ShopSchema.[Shop] AS S, (SELECT MX.shopName, MAX(MX.maxCost) AS maxSale
-                                      FROM (SELECT shopName, shopmanCode, maxCost 
+                                      FROM (SELECT shopName, shopmanCode, maxCost
                                             FROM (SELECT C.shopmanCode, MAX(totalCost) AS maxCost
                                                   FROM (SELECT Shopman.shopmanCode, totalCost
                                                         FROM ShopSchema.Shopman JOIN ShopSchema.[Check] ON Shopman.shopmanCode = [Check].shopmanCode) AS C
@@ -210,7 +210,7 @@ WITH SELLINGS_CTE (City, Cost)
 AS
 (
   SELECT A.city, [CHECKS].totalCost AS [COST] FROM (SELECT [SHOPS].city, [SALERS].shopmanCode
-                                                    FROM ShopSchema.Shop AS [SHOPS], ShopSchema.Shopman AS [SALERS] 
+                                                    FROM ShopSchema.Shop AS [SHOPS], ShopSchema.Shopman AS [SALERS]
                                                     WHERE [SHOPS].shopCode = [SALERS].shopCode) AS A
   JOIN ShopSchema.[Check] AS [CHECKS] ON [CHECKS].shopmanCode = A.shopmanCode and CHECKS.date BETWEEN '2017-06-01' AND '2017-08-31'
 )
@@ -235,8 +235,8 @@ CREATE VIEW ShopSchema.[Shopmans' phone numbers] AS
 GO
 CREATE VIEW ShopSchema.[Stores' Profit] WITH SCHEMABINDING
   AS
-    (SELECT MX.shopName, MAX(MX.maxCost) AS maxSale 
-      FROM (SELECT shopName, shopmanCode, maxCost 
+    (SELECT MX.shopName, MAX(MX.maxCost) AS maxSale
+      FROM (SELECT shopName, shopmanCode, maxCost
             FROM (SELECT C.shopmanCode, MAX(totalCost) AS maxCost
                  FROM (SELECT Shopman.shopmanCode, totalCost
                        FROM ShopSchema.Shopman JOIN ShopSchema.[Check]
@@ -333,8 +333,8 @@ ShopSchema.usp_scroll_checks_cursor_by_full_price
 
 CREATE FUNCTION ShopSchema.fn_sellers_by_city(@city VARCHAR(50)) RETURNS TABLE
 AS
-  RETURN SELECT S.lastName, S.firstName, Shop.shopName, Shop.shopCode FROM ShopSchema.Shopman AS S JOIN ShopSchema.Shop ON S.shopCode = Shop.shopCode 
-  WHERE Shop.city = @city
+  RETURN SELECT S.lastName, S.firstName, Shop.shopName, Shop.shopCode FROM ShopSchema.Shopman AS S JOIN ShopSchema.Shop ON S.shopCode = Shop.shopCode
+  WHERE Shop.city = @city AND (S.position = 'продавец-консультант' OR S.position = 'администратор' OR S.position = 'старший продавец')
 GO
 
 CREATE PROCEDURE ShopSchema.usp_checks_from_data_by_city_cursor
@@ -343,10 +343,10 @@ CREATE PROCEDURE ShopSchema.usp_checks_from_data_by_city_cursor
 AS
   SET @checks_cursor = CURSOR FORWARD_ONLY
                             STATIC
-  FOR SELECT [Check].totalCost, [Check].discount, [Shopman].lastName, [Shopman].firstName, CITY.shopName AS [AGE]
+  FOR SELECT DISTINCT A.totalCost, A.discount, A.lastName, A.firstName, CITY.shopName AS [Shop] FROM (SELECT [Check].totalCost, [Check].discount, S.lastName, S.firstName, S.shopCode
   FROM ShopSchema.[Check]
-  JOIN ShopSchema.[Shopman] AS S ON [Check].shopmanCode = Shopman.shopmanCode
-  JOIN ShopSchema.fn_sellers_by_city('Moscow') AS CITY ON S.shopCode = CITY.shopCode
+  JOIN ShopSchema.[Shopman] AS S ON [Check].shopmanCode = S.shopmanCode) AS A
+  JOIN ShopSchema.fn_sellers_by_city('Moscow') AS CITY ON A.shopCode = CITY.shopCode
   WHERE [Check].date BETWEEN @date AND GETDATE()
   OPEN @checks_cursor
 GO
@@ -402,7 +402,7 @@ AS
   END
 GO
 
-INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) 
+INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
 VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'bellboy', 0)
 GO
 
@@ -416,7 +416,7 @@ AS
         RAISERROR ('Invalid columns are tried to update', 10, 1)
         ROLLBACK
       END
-    ELSE IF (exists(SELECT inserted.position FROM inserted 
+    ELSE IF (exists(SELECT inserted.position FROM inserted
                     WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
       BEGIN
         RAISERROR ('Invalid position', 10, 1)
@@ -464,7 +464,7 @@ AS
   END
 GO
 
-INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) 
+INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
 VALUES ('d', 'b', 'c', '1993-01-01', '89164472638', 'уборщик', 0)
 DELETE FROM ShopSchema.Shopman WHERE firstName = 'd'
 GO
@@ -474,8 +474,8 @@ ON ShopSchema.Admins
 INSTEAD OF INSERT
 AS
   BEGIN
-    INSERT INTO ShopSchema.Shopman SELECT inserted.firstName, inserted.lastName, inserted.middleName, 
-                                     inserted.dateOfBirth, inserted.phone, 'администратор' AS position, 0 AS isFired, 
+    INSERT INTO ShopSchema.Shopman SELECT inserted.firstName, inserted.lastName, inserted.middleName,
+                                     inserted.dateOfBirth, inserted.phone, 'администратор' AS position, 0 AS isFired,
                                      (SELECT Shop.shopCode FROM Shop WHERE Shop.shopName = inserted.shopName)
                                    FROM inserted
   END
