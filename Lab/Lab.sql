@@ -193,11 +193,13 @@ SELECT T.itemName, T.Count, T.price * T.Count AS [Total Profit] FROM (SELECT D.i
 GO
 
 --для каждого города указана максимальнеая продажа
-SELECT [SHOPS].city, MAX([SHOPS].maxSale) AS maxSale FROM (SELECT S.city, R.maxSale FROM ShopSchema.[Shop] AS S, (SELECT MX.shopName, MAX(MX.maxCost) AS maxSale
-                                                        FROM (SELECT shopName, shopmanCode, maxCost FROM (SELECT C.shopmanCode, MAX(totalCost) AS maxCost
-                                                                                                 FROM (SELECT Shopman.shopmanCode, totalCost
-                                                                                                       FROM ShopSchema.Shopman JOIN ShopSchema.[Check]
-                                                                                                           ON Shopman.shopmanCode = [Check].shopmanCode) AS C
+SELECT [SHOPS].city, MAX([SHOPS].maxSale) AS maxSale 
+  FROM (SELECT S.city, R.maxSale 
+        FROM ShopSchema.[Shop] AS S, (SELECT MX.shopName, MAX(MX.maxCost) AS maxSale
+                                      FROM (SELECT shopName, shopmanCode, maxCost 
+                                            FROM (SELECT C.shopmanCode, MAX(totalCost) AS maxCost
+                                                  FROM (SELECT Shopman.shopmanCode, totalCost
+                                                        FROM ShopSchema.Shopman JOIN ShopSchema.[Check] ON Shopman.shopmanCode = [Check].shopmanCode) AS C
   GROUP BY shopmanCode) AS A
   JOIN ShopSchema.Shop AS B ON exists(SELECT D.shopCode FROM ShopSchema.Shopman AS D WHERE D.shopCode = B.shopCode AND D.shopmanCode = A.shopmanCode))
   AS MX GROUP BY MX.shopName) AS R WHERE S.shopName = R.shopName) AS [SHOPS] GROUP BY [SHOPS].city ORDER BY  maxSale DESC
@@ -208,7 +210,8 @@ WITH SELLINGS_CTE (City, Cost)
 AS
 (
   SELECT A.city, [CHECKS].totalCost AS [COST] FROM (SELECT [SHOPS].city, [SALERS].shopmanCode
-                                                    FROM ShopSchema.Shop AS [SHOPS], ShopSchema.Shopman AS [SALERS] WHERE [SHOPS].shopCode = [SALERS].shopCode) AS A
+                                                    FROM ShopSchema.Shop AS [SHOPS], ShopSchema.Shopman AS [SALERS] 
+                                                    WHERE [SHOPS].shopCode = [SALERS].shopCode) AS A
   JOIN ShopSchema.[Check] AS [CHECKS] ON [CHECKS].shopmanCode = A.shopmanCode and CHECKS.date BETWEEN '2017-06-01' AND '2017-08-31'
 )
 SELECT SELLINGS_CTE.City, SUM(SELLINGS_CTE.Cost) AS [Total Profit] FROM SELLINGS_CTE GROUP BY SELLINGS_CTE.City ORDER BY [Total Profit] DESC
@@ -232,10 +235,12 @@ CREATE VIEW ShopSchema.[Shopmans' phone numbers] AS
 GO
 CREATE VIEW ShopSchema.[Stores' Profit] WITH SCHEMABINDING
   AS
-    (SELECT MX.shopName, MAX(MX.maxCost) AS maxSale FROM (SELECT shopName, shopmanCode, maxCost FROM (SELECT C.shopmanCode, MAX(totalCost) AS maxCost
-                                                                                                 FROM (SELECT Shopman.shopmanCode, totalCost
-                                                                                                       FROM ShopSchema.Shopman JOIN ShopSchema.[Check]
-                                                                                                           ON Shopman.shopmanCode = [Check].shopmanCode) AS C
+    (SELECT MX.shopName, MAX(MX.maxCost) AS maxSale 
+      FROM (SELECT shopName, shopmanCode, maxCost 
+            FROM (SELECT C.shopmanCode, MAX(totalCost) AS maxCost
+                 FROM (SELECT Shopman.shopmanCode, totalCost
+                       FROM ShopSchema.Shopman JOIN ShopSchema.[Check]
+                           ON Shopman.shopmanCode = [Check].shopmanCode) AS C
   GROUP BY shopmanCode) AS A
   JOIN ShopSchema.Shop AS B ON
                               exists(SELECT D.shopCode FROM ShopSchema.Shopman AS D WHERE D.shopCode = B.shopCode AND D.shopmanCode = A.shopmanCode))
@@ -328,7 +333,8 @@ ShopSchema.usp_scroll_checks_cursor_by_full_price
 
 CREATE FUNCTION ShopSchema.fn_sellers_by_city(@city VARCHAR(50)) RETURNS TABLE
 AS
-  RETURN SELECT S.lastName, S.firstName, Shop.shopName, Shop.shopCode FROM ShopSchema.Shopman AS S JOIN ShopSchema.Shop ON S.shopCode = Shop.shopCode WHERE Shop.city = @city
+  RETURN SELECT S.lastName, S.firstName, Shop.shopName, Shop.shopCode FROM ShopSchema.Shopman AS S JOIN ShopSchema.Shop ON S.shopCode = Shop.shopCode 
+  WHERE Shop.city = @city
 GO
 
 CREATE PROCEDURE ShopSchema.usp_checks_from_data_by_city_cursor
@@ -396,7 +402,8 @@ AS
   END
 GO
 
-INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'bellboy', 0)
+INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) 
+VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'bellboy', 0)
 GO
 
 CREATE TRIGGER ShopSchema.shopman_update
@@ -409,7 +416,8 @@ AS
         RAISERROR ('Invalid columns are tried to update', 10, 1)
         ROLLBACK
       END
-    ELSE IF (exists(SELECT inserted.position FROM inserted WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
+    ELSE IF (exists(SELECT inserted.position FROM inserted 
+                    WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
       BEGIN
         RAISERROR ('Invalid position', 10, 1)
         ROLLBACK
@@ -456,8 +464,9 @@ AS
   END
 GO
 
-INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'уборщик', 0)
-DELETE FROM ShopSchema.Shopman WHERE firstName = 'a'
+INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) 
+VALUES ('d', 'b', 'c', '1993-01-01', '89164472638', 'уборщик', 0)
+DELETE FROM ShopSchema.Shopman WHERE firstName = 'd'
 GO
 
 CREATE TRIGGER ShopSchema.admins_insert
@@ -465,7 +474,9 @@ ON ShopSchema.Admins
 INSTEAD OF INSERT
 AS
   BEGIN
-    INSERT INTO ShopSchema.Shopman SELECT inserted.firstName, inserted.lastName, inserted.middleName, inserted.dateOfBirth, inserted.phone, 'администратор' AS position, 0 AS isFired, (SELECT Shop.shopCode FROM Shop WHERE Shop.shopName = inserted.shopName)
+    INSERT INTO ShopSchema.Shopman SELECT inserted.firstName, inserted.lastName, inserted.middleName, 
+                                     inserted.dateOfBirth, inserted.phone, 'администратор' AS position, 0 AS isFired, 
+                                     (SELECT Shop.shopCode FROM Shop WHERE Shop.shopName = inserted.shopName)
                                    FROM inserted
   END
 GO
