@@ -250,7 +250,7 @@ GO
 --представление администраторов в каждом магазине
 CREATE VIEW ShopSchema.[Admins] WITH SCHEMABINDING
   AS
-  SELECT shopmanCode, firstName, lastName, middleName, dateOfBirth, phone, isFired, shopName
+  SELECT shopmanCode, firstName, lastName, middleName, dateOfBirth, phone, isFired, shopName, Shop.shopCode
   FROM ShopSchema.[Shopman] JOIN ShopSchema.[Shop] ON Shopman.shopCode = Shop.shopCode
   WHERE position = 'администратор'
 GO
@@ -348,28 +348,73 @@ GO
 
 CREATE TRIGGER ShopSchema.shopman_insert
 ON ShopSchema.Shopman
-AFTER INSERT
+INSTEAD OF INSERT
 AS
-  IF (exists(SELECT inserted.position FROM inserted WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
-      BEGIN
-        RAISERROR ('Invalid positon', 10, 1)
-        ROLLBACK
-      END
+  BEGIN
+    DECLARE @firstName   VARCHAR(25)
+    DECLARE @lastName    VARCHAR(25)
+    DECLARE @middleName  VARCHAR(25)
+    DECLARE @dateOfBirth DATE
+    DECLARE @phone       CHAR(11)
+    DECLARE @position    VARCHAR(25)
+    DECLARE @shopCode    INT
+
+    DECLARE @error_msg VARCHAR(100)
+
+    DECLARE @shopman_cursor CURSOR
+
+    SET @shopman_cursor = CURSOR FORWARD_ONLY
+                          STATIC
+    FOR SELECT inserted.firstName, inserted.lastName, inserted.middleName,
+          inserted.dateOfBirth, inserted.phone, inserted.position, inserted.shopCode FROM inserted
+    OPEN @shopman_cursor
+
+    FETCH NEXT FROM @shopman_cursor INTO @firstName, @lastName, @middleName, @dateOfBirth, @phone, @position, @shopCode
+
+    WHILE (@@FETCH_STATUS = 0)
+    BEGIN
+      IF (exists(SELECT * FROM ShopSchema.Shopman WHERE shopCode = @shopCode AND @position = position AND position = 'администратор'))
+        BEGIN
+          SET @error_msg = 'Attempt to add second administrator in shop: ' + CAST(@shopCode AS VARCHAR)
+          RAISERROR (@error_msg, 10, 1)
+        END
+      ELSE IF (@position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец'))
+        BEGIN
+          SET @error_msg = 'Invalid position: ' + @position
+          RAISERROR (@error_msg, 10, 1)
+        END
+      ELSE
+        BEGIN
+          INSERT INTO ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
+          VALUES (@firstName, @lastName, @middleName, @dateOfBirth, @phone, @position, @shopCode)
+        END
+
+      FETCH NEXT FROM @shopman_cursor INTO @firstName, @lastName, @middleName, @dateOfBirth, @phone, @position, @shopCode
+    END
+    CLOSE @shopman_cursor
+    DEALLOCATE @shopman_cursor
+  END
 GO
 
 INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'bellboy', 0)
 GO
 
-
 CREATE TRIGGER ShopSchema.shopman_update
 ON ShopSchema.Shopman
 AFTER UPDATE
 AS
-    IF (exists(SELECT inserted.position FROM inserted WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
+  BEGIN
+    IF UPDATE(dateOfBirth) OR UPDATE(middleName)
       BEGIN
-        RAISERROR ('Invalid positon', 10, 1)
+        RAISERROR ('Invalid columns are tried to update', 10, 1)
         ROLLBACK
       END
+    ELSE IF (exists(SELECT inserted.position FROM inserted WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
+      BEGIN
+        RAISERROR ('Invalid position', 10, 1)
+        ROLLBACK
+      END
+  END
 GO
 
 UPDATE ShopSchema.Shopman SET position = 'администрато' WHERE position = 'администратор'
@@ -378,13 +423,40 @@ GO
 
 CREATE TRIGGER ShopSchema.shopman_delete
 ON ShopSchema.Shopman
-AFTER DELETE
+INSTEAD OF DELETE
 AS
-  PRINT 'rows from shopman was deleted'
-  SELECT * FROM deleted
+  BEGIN
+    DECLARE @shopmanCode INT
+    DECLARE @firstName   VARCHAR(25)
+    DECLARE @lastName    VARCHAR(25)
+    DECLARE @middleName  VARCHAR(25)
+    DECLARE @dateOfBirth DATE
+    DECLARE @phone       CHAR(11)
+    DECLARE @position    VARCHAR(25)
+    DECLARE @shopCode    INT
+
+    DECLARE @shopman_cursor CURSOR
+
+    SET @shopman_cursor = CURSOR FORWARD_ONLY
+                          STATIC
+    FOR SELECT deleted.shopmanCode, deleted.firstName, deleted.lastName, deleted.middleName,
+          deleted.dateOfBirth, deleted.phone, deleted.position, deleted.shopCode FROM deleted
+
+    OPEN @shopman_cursor
+
+    FETCH NEXT FROM @shopman_cursor INTO @shopmanCode, @firstName, @lastName, @middleName, @dateOfBirth, @phone, @position, @shopCode
+
+    WHILE (@@FETCH_STATUS = 0)
+    BEGIN
+      PRINT 'Fired: ' + CAST(@shopmanCode AS VARCHAR) + ' ' + @firstName + ' ' + @lastName + ' ' + @middleName + ' ' +
+            CAST(@dateOfBirth AS VARCHAR) + ' ' + @phone + ' ' + @position + ' ' + CAST(@shopCode AS VARCHAR)
+      UPDATE ShopSchema.Shopman SET isFired = 1 WHERE shopmanCode = @shopmanCode
+      FETCH NEXT FROM @shopman_cursor INTO @shopmanCode, @firstName, @lastName, @middleName, @dateOfBirth, @phone, @position, @shopCode
+    END
+  END
 GO
 
-INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'администратор', 0)
+INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'уборщик', 0)
 DELETE FROM ShopSchema.Shopman WHERE firstName = 'a'
 GO
 
@@ -393,22 +465,8 @@ ON ShopSchema.Admins
 INSTEAD OF INSERT
 AS
   BEGIN
-  IF (exists(SELECT inserted.shopName FROM inserted WHERE inserted.shopName NOT IN (SELECT Shop.shopName FROM ShopSchema.Shop)))
-      BEGIN
-        RAISERROR ('Invalid shopname', 10, 1)
-        ROLLBACK
-      END
-  IF (exists(SELECT * FROM inserted WHERE exists(SELECT * FROM (ShopSchema.Shopman JOIN ShopSchema.Shop ON Shopman.shopCode = Shop.shopCode AND Shopman.position = 'администратор')
-                                                   WHERE inserted.shopName = Shop.shopName AND Shopman.isFired = 0)))
-        BEGIN
-          RAISERROR ('Attempt to add second administrator in shop', 10, 1)
-          ROLLBACK
-        END
-  ELSE
-      BEGIN
-        INSERT INTO ShopSchema.Shopman SELECT inserted.firstName, inserted.lastName, inserted.middleName, inserted.dateOfBirth, inserted.phone, 'администратор' AS position, 0 AS isFired, (SELECT Shop.shopCode FROM Shop WHERE Shop.shopName = inserted.shopName)
-                                       FROM inserted
-      END
+    INSERT INTO ShopSchema.Shopman SELECT inserted.firstName, inserted.lastName, inserted.middleName, inserted.dateOfBirth, inserted.phone, 'администратор' AS position, 0 AS isFired, (SELECT Shop.shopCode FROM Shop WHERE Shop.shopName = inserted.shopName)
+                                   FROM inserted
   END
 GO
 
@@ -421,30 +479,45 @@ ON ShopSchema.Admins
 INSTEAD OF UPDATE
 AS
   BEGIN
-    IF (exists(SELECT inserted.shopName FROM inserted WHERE inserted.shopName NOT IN (SELECT Shop.shopName FROM ShopSchema.Shop)))
+    DECLARE @shopmanCode INT
+    DECLARE @phone       CHAR(11)
+    DECLARE @isFired     BIT
+    DECLARE @shopCode    INT
+    DECLARE @firstName   VARCHAR(25)
+    DECLARE @lastName    VARCHAR(25)
+
+    DECLARE @admins_cursor CURSOR
+
+    SET @admins_cursor = CURSOR FORWARD_ONLY
+                         STATIC
+    FOR SELECT inserted.shopmanCode, inserted.firstName, inserted.lastName, inserted.phone, inserted.isFired, inserted.shopCode FROM inserted
+    OPEN @admins_cursor
+
+    FETCH NEXT FROM @admins_cursor INTO @shopmanCode, @firstName, @lastName, @phone, @isFired, @shopCode
+
+    WHILE (@@FETCH_STATUS = 0)
     BEGIN
-      RAISERROR ('Invalid shopname', 10, 1)
-      ROLLBACK
-    END
-    ELSE
-      BEGIN
-        IF update(firstName) OR update(lastName) OR update(middleName) OR update(dateOfBirth)
-          BEGIN
-            RAISERROR ('Invalid columns are tried to update', 10, 1)
-            ROLLBACK
-          END
-        ELSE
+      IF UPDATE(shopName)
+        BEGIN
+          RAISERROR ('''ShopName'' column are tried to update', 10, 1)
+          ROLLBACK
+        END
+      ELSE
+        BEGIN
           UPDATE ShopSchema.Shopman SET
-            Shopman.phone = (SELECT phone FROM inserted WHERE inserted.shopmanCode = Shopman.shopmanCode),
-            Shopman.isFired = (SELECT isFired FROM inserted WHERE inserted.shopmanCode = Shopman.shopmanCode),
-            Shopman.shopCode = (SELECT shopCode FROM ShopSchema.Shop JOIN inserted ON inserted.shopName = Shop.shopName)
-          WHERE Shopman.shopmanCode = (SELECT shopmanCode FROM inserted WHERE inserted.shopmanCode = Shopman.shopmanCode)
-      END
+            firstName = @firstName,
+            lastName = @lastName,
+            phone = @phone,
+            isFired = @isFired,
+            shopCode = @shopCode
+          WHERE ShopSchema.Shopman.shopmanCode = @shopmanCode
+        END
+      FETCH NEXT FROM @admins_cursor INTO @shopmanCode, @firstName, @lastName, @phone, @isFired, @shopCode
+    END
   END
 GO
 
-
-UPDATE ShopSchema.Admins SET phone = '89256475648' WHERE shopmanCode = 0
+UPDATE ShopSchema.Admins SET phone = '89253577755' WHERE shopmanCode = 6
 GO
 
 CREATE TRIGGER ShopSchema.admins_delete
