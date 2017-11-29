@@ -163,8 +163,8 @@ CREATE TABLE ShopDB.ShopSchema.[Store]
   GO
 
 
---чеки с дисконтной картой
-SELECT [Check].[checkID], [Check].[totalCost] FROM ShopDB.ShopSchema.[Check] WHERE [Check].[checkID] in (SELECT Card.checkID FROM ShopDB.ShopSchema.Card WHERE type = 0)
+--чеки с карторй
+SELECT [Check].[checkID], [Check].[totalCost] FROM ShopDB.ShopSchema.[Check] WHERE [Check].[checkID] in (SELECT checkID FROM ShopDB.ShopSchema.Card_Subtype)
 GO
 
 --чеки от неуволенных сотрудников
@@ -198,18 +198,16 @@ SELECT MX.shopName, MAX(MX.maxCost) AS maxSale FROM (SELECT shopName, shopmanCod
   AS MX GROUP BY MX.shopName ORDER BY maxSale DESC
 GO
 
-
--- костыль, чтобы избавиться от повторений
--- SELECT D.itemName, D.Count, D.price, MAX(D.Count) AS [SMTH] FROM (SELECT C.itemName, C.itemID, C.Count, price FROM (SELECT itemName, A.Count, B.itemID FROM (SELECT itemID, count(*) as Count FROM ShopSchema.Check_Item_INT GROUP BY itemID) AS A
---   JOIN ShopSchema.Item AS B ON A.itemID = B.itemID) AS C JOIN ShopSchema.Store ON C.itemID = ShopSchema.Store.itemID) AS D GROUP BY D.itemName, D.Count, D.price
-
---таблица, где для каждого товара указано количесвто его продаж и выручка с этого
-SELECT T.itemName, T.Count, T.price * T.Count AS [Total Profit] FROM (SELECT D.itemName, D.Count, D.price, MAX(D.Count) AS [SMTH]
-                                                                      FROM (SELECT C.itemName, C.itemID, C.Count, price
-                                                                            FROM (SELECT itemName, A.Count, B.itemID
-                                                                                  FROM (SELECT itemID, count(*) as Count
-                                                                                        FROM ShopSchema.Check_Item_INT GROUP BY itemID) AS A
-  JOIN ShopSchema.Item AS B ON A.itemID = B.itemID) AS C JOIN ShopSchema.Store ON C.itemID = ShopSchema.Store.itemID) AS D GROUP BY D.itemName, D.Count, D.price) AS T
+--таблица, где для каждого товара указано количесвто его продаж и выручка с этого, цена > 5000
+SELECT T.itemName, T.Count, T.price * T.Count AS [Total Profit]
+  FROM (SELECT D.itemName, D.Count, D.price, MAX(D.Count) AS [SMTH]
+        FROM (SELECT C.itemName, C.itemID, C.Count, price
+              FROM (SELECT itemName, A.Count, B.itemID
+                    FROM (SELECT itemID, count(*) as Count
+                          FROM ShopSchema.Check_Item_INT GROUP BY itemID) AS A
+                      JOIN ShopSchema.Item AS B ON A.itemID = B.itemID) AS C
+                JOIN ShopSchema.Store ON C.itemID = ShopSchema.Store.itemID) AS D
+        GROUP BY D.itemName, D.Count, D.price HAVING D.price > 5000) AS T
   ORDER BY [Total Profit] DESC
 GO
 
@@ -235,7 +233,7 @@ AS
                                                     WHERE [SHOPS].shopCode = [SALERS].shopCode) AS A
   JOIN ShopSchema.[Check] AS [CHECKS] ON [CHECKS].shopmanCode = A.shopmanCode and CHECKS.date BETWEEN '2017-06-01' AND '2017-08-31'
 )
-SELECT SELLINGS_CTE.City, SUM(SELLINGS_CTE.Cost) AS [Total Profit] FROM SELLINGS_CTE GROUP BY SELLINGS_CTE.City ORDER BY [Total Profit] DESC
+SELECT SELLINGS_CTE.City, SUM(SELLINGS_CTE.Cost) AS [Total Profit] FROM SELLINGS_CTE GROUP BY SELLINGS_CTE.City ORDER BY [Total Profit] ASC
 GO
 
 CREATE TABLE ShopDB.ShopSchema.[tempItemTable] (itemID INT PRIMARY KEY , country VARCHAR(50))
@@ -249,6 +247,50 @@ ON ([temp].itemID = [item].itemID)
 WHEN MATCHED THEN UPDATE SET [item].country = [temp].country;
 DROP TABLE ShopSchema.tempItemTable
 GO
+
+--товары с ценой
+SELECT DISTINCT itemName, price FROM ShopSchema.Item JOIN ShopSchema.Store ON Item.itemID = Store.itemID
+
+--чеки со стоимостью от 15000 или до 20000 (с повторениями)
+SELECT checkID, totalCost FROM ShopSchema.[Check] WHERE totalCost > 15000
+UNION ALL SELECT checkID, totalCost FROM ShopSchema.[Check] WHERE totalCost < 20000
+
+--чеки со стоимостью от 15000 или до 20000 (без повторений)
+SELECT checkID, totalCost FROM ShopSchema.[Check] WHERE totalCost > 15000
+UNION SELECT checkID, totalCost FROM ShopSchema.[Check] WHERE totalCost < 20000
+
+--чеки со стоимостью >=20000
+SELECT checkID, totalCost FROM ShopSchema.[Check] WHERE totalCost > 15000
+EXCEPT SELECT checkID, totalCost FROM ShopSchema.[Check] WHERE totalCost < 20000
+
+
+--чеки со стоимостью от 15000 до 20000
+SELECT checkID, totalCost FROM ShopSchema.[Check] WHERE totalCost > 15000
+INTERSECT SELECT checkID, totalCost FROM ShopSchema.[Check] WHERE totalCost < 20000
+GO
+
+SELECT A.cardID, A.firstName, A.lastName, date, discount, totalCost FROM (SELECT Card.cardID, Card_Subtype.checkID, firstName, lastName
+              FROM ShopSchema.Card JOIN ShopSchema.Card_Subtype ON Card.cardID = Card_Subtype.cardID) AS A
+  RIGHT JOIN ShopSchema.[Check] ON A.checkID = [Check].checkID
+GO
+
+SELECT [Check].checkID, date, totalCost, eventID FROM ShopSchema.[Check] LEFT JOIN ShopSchema.Event_Subtype ON [Check].checkID = Event_Subtype.checkID
+GO
+
+SELECT [Check].checkID, date, totalCost, cardID, eventID FROM ShopSchema.[Check] FULL OUTER JOIN ShopSchema.Card_Subtype ON [Check].checkID = Card_Subtype.checkID
+FULL OUTER JOIN ShopSchema.Event_Subtype ON [Check].checkID = Event_Subtype.checkID
+GO
+
+SELECT AVG(A.totalCost) FROM (SELECT [Check].checkID, date, totalCost, cardID, eventID FROM ShopSchema.[Check] FULL OUTER JOIN ShopSchema.Card_Subtype ON [Check].checkID = Card_Subtype.checkID
+FULL OUTER JOIN ShopSchema.Event_Subtype ON [Check].checkID = Event_Subtype.checkID
+WHERE eventID IS NULL OR cardID IS NULL) AS A
+GO
+
+SELECT MIN(A.totalCost), A.city FROM (SELECT totalCost, S.shopmanCode, city
+                            FROM ShopSchema.[Check] JOIN ShopSchema.Shopman AS S ON [Check].shopmanCode = S.shopmanCode
+                            JOIN ShopSchema.Shop AS SH ON S.shopCode = SH.shopCode) AS A GROUP BY city
+
+--========================--
 
 CREATE VIEW ShopSchema.[Shopmans' phone numbers] AS
   (SELECT [Shopman].firstName, [Shopman].lastName, [Shopman].phone
@@ -388,123 +430,6 @@ FROM ShopSchema.[Check] AS C
   JOIN ShopSchema.Check_Item_INT AS INT ON C.checkID = INT.checkID
   JOIN ShopSchema.Item AS I ON INT.itemID = I.itemID
   JOIN ShopSchema.Store AS S ON I.itemID = S.itemID AND ShopSchema.search_shopCode_by_shopmanCode(C.shopmanCode) = S.shopCode
-GO
-
-CREATE TRIGGER ShopSchema.shopman_insert
-ON ShopSchema.Shopman
-INSTEAD OF INSERT
-AS
-  BEGIN
-    DECLARE @firstName   VARCHAR(25)
-    DECLARE @lastName    VARCHAR(25)
-    DECLARE @middleName  VARCHAR(25)
-    DECLARE @dateOfBirth DATE
-    DECLARE @phone       CHAR(11)
-    DECLARE @position    VARCHAR(25)
-    DECLARE @shopCode    INT
-
-    DECLARE @error_msg VARCHAR(100)
-
-    DECLARE @shopman_cursor CURSOR
-
-    SET @shopman_cursor = CURSOR FORWARD_ONLY
-                          STATIC
-    FOR SELECT inserted.firstName, inserted.lastName, inserted.middleName,
-          inserted.dateOfBirth, inserted.phone, inserted.position, inserted.shopCode FROM inserted
-    OPEN @shopman_cursor
-
-    FETCH NEXT FROM @shopman_cursor INTO @firstName, @lastName, @middleName, @dateOfBirth, @phone, @position, @shopCode
-
-    WHILE (@@FETCH_STATUS = 0)
-    BEGIN
-      IF (exists(SELECT * FROM ShopSchema.Shopman WHERE shopCode = @shopCode AND @position = position AND position = 'администратор'))
-        BEGIN
-          SET @error_msg = 'Attempt to add second administrator in shop: ' + CAST(@shopCode AS VARCHAR)
-          RAISERROR (@error_msg, 10, 1)
-        END
-      ELSE IF (@position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец'))
-        BEGIN
-          SET @error_msg = 'Invalid position: ' + @position
-          RAISERROR (@error_msg, 10, 1)
-        END
-      ELSE
-        BEGIN
-          INSERT INTO ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
-          VALUES (@firstName, @lastName, @middleName, @dateOfBirth, @phone, @position, @shopCode)
-        END
-
-      FETCH NEXT FROM @shopman_cursor INTO @firstName, @lastName, @middleName, @dateOfBirth, @phone, @position, @shopCode
-    END
-    CLOSE @shopman_cursor
-    DEALLOCATE @shopman_cursor
-  END
-GO
-
-INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
-VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'bellboy', 0)
-GO
-
-CREATE TRIGGER ShopSchema.shopman_update
-ON ShopSchema.Shopman
-AFTER UPDATE
-AS
-  BEGIN
-    IF UPDATE(dateOfBirth) OR UPDATE(middleName)
-      BEGIN
-        RAISERROR ('Invalid columns are tried to update', 10, 1)
-        ROLLBACK
-      END
-    ELSE IF (exists(SELECT inserted.position FROM inserted
-                    WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
-      BEGIN
-        RAISERROR ('Invalid position', 10, 1)
-        ROLLBACK
-      END
-  END
-GO
-
-UPDATE ShopSchema.Shopman SET position = 'администрато' WHERE position = 'администратор'
-GO
-
-
-CREATE TRIGGER ShopSchema.shopman_delete
-ON ShopSchema.Shopman
-INSTEAD OF DELETE
-AS
-  BEGIN
-    DECLARE @shopmanCode INT
-    DECLARE @firstName   VARCHAR(25)
-    DECLARE @lastName    VARCHAR(25)
-    DECLARE @middleName  VARCHAR(25)
-    DECLARE @dateOfBirth DATE
-    DECLARE @phone       CHAR(11)
-    DECLARE @position    VARCHAR(25)
-    DECLARE @shopCode    INT
-
-    DECLARE @shopman_cursor CURSOR
-
-    SET @shopman_cursor = CURSOR FORWARD_ONLY
-                          STATIC
-    FOR SELECT deleted.shopmanCode, deleted.firstName, deleted.lastName, deleted.middleName,
-          deleted.dateOfBirth, deleted.phone, deleted.position, deleted.shopCode FROM deleted
-
-    OPEN @shopman_cursor
-
-    FETCH NEXT FROM @shopman_cursor INTO @shopmanCode, @firstName, @lastName, @middleName, @dateOfBirth, @phone, @position, @shopCode
-
-    WHILE (@@FETCH_STATUS = 0)
-    BEGIN
-      PRINT 'Fired: ' + CAST(@shopmanCode AS VARCHAR) + ' ' + @firstName + ' ' + @lastName + ' ' + @middleName + ' ' +
-            CAST(@dateOfBirth AS VARCHAR) + ' ' + @phone + ' ' + @position + ' ' + CAST(@shopCode AS VARCHAR)
-      UPDATE ShopSchema.Shopman SET isFired = 1 WHERE shopmanCode = @shopmanCode
-      FETCH NEXT FROM @shopman_cursor INTO @shopmanCode, @firstName, @lastName, @middleName, @dateOfBirth, @phone, @position, @shopCode
-    END
-  END
-GO
-
-INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
-VALUES ('d', 'b', 'c', '1993-01-01', '89164472638', 'уборщик', 0)
-DELETE FROM ShopSchema.Shopman WHERE firstName = 'd'
 GO
 
 CREATE TRIGGER ShopSchema.admins_insert
@@ -749,3 +674,137 @@ AS
     RAISERROR('It''s not allowed to update columns from this view', 10, 1)
   END
 
+
+--===============================--
+--Lab9
+--===============================--
+
+CREATE VIEW ShopSchema.[Shops and Shopmans] WITH SCHEMABINDING
+AS
+SELECT Shop.shopCode, shopName, isOutlet, address, city, shopmanCode, firstName, lastName, middleName, dateOfBirth, phone, position, isFired FROM ShopSchema.Shop JOIN ShopSchema.Shopman
+  ON Shop.shopCode = Shopman.shopCode
+GO
+
+CREATE TRIGGER ShopSchema.shopman_insert
+ON ShopSchema.Shopman
+INSTEAD OF INSERT
+AS
+  IF (exists(SELECT inserted.position FROM inserted WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
+        THROW 50000, 'Invalid position', 1
+  ELSE IF (exists(SELECT * FROM inserted WHERE inserted.phone IN (SELECT phone FROM ShopSchema.Shopman)))
+        THROW 50000, 'Invalid phone', 1
+  ELSE
+    INSERT INTO ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
+      SELECT inserted.firstName, inserted.lastName, inserted.middleName, inserted.dateOfBirth, inserted.phone, inserted.position, inserted.shopCode FROM inserted
+GO
+INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'bellboy', 0)
+GO
+
+CREATE TRIGGER ShopSchema.shopman_update
+ON ShopSchema.Shopman
+INSTEAD OF UPDATE
+AS
+  BEGIN
+    IF (UPDATE(middleName))
+      RAISERROR ('Trying to update column ''middleName''', 10, 1)
+    IF (UPDATE(dateOfBirth))
+      RAISERROR ('Trying to update column ''dateOfBirth''', 10, 1)
+    IF (exists(SELECT inserted.position FROM inserted WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
+      THROW 50000, 'Invalid position', 1
+
+    ELSE IF (NOT UPDATE(middleName) AND NOT UPDATE(dateOfBirth))
+      UPDATE ShopSchema.Shopman SET
+        firstName  = (SELECT firstName  FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+        lastName   = (SELECT lastName   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+        middleName = (SELECT middleName FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+        phone      = (SELECT phone      FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+        position   = (SELECT position   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+        isFired    = (SELECT isFired    FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+        shopCode   = (SELECT shopCode   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted))
+      WHERE shopmanCode IN (SELECT shopmanCode FROM inserted)
+  END
+GO
+UPDATE ShopSchema.Shopman SET position = 'администрато' WHERE position = 'администратор'
+GO
+
+CREATE TRIGGER ShopSchema.shopman_delete
+ON ShopSchema.Shopman
+INSTEAD OF DELETE
+AS
+  UPDATE ShopSchema.Shopman SET isFired = 1 WHERE shopmanCode IN (SELECT shopmanCode FROM deleted)
+GO
+
+DELETE FROM ShopSchema.Shopman WHERE shopmanCode = 0
+UPDATE ShopSchema.Shopman SET isFired = 0 WHERE shopmanCode = 0
+
+CREATE TRIGGER ShopSchema.shops_and_shopmans_insert
+ON ShopSchema.[Shops and Shopmans]
+INSTEAD OF INSERT
+AS
+  BEGIN
+    --вставка только по shopName
+    IF (EXISTS(SELECT * FROM inserted WHERE shopCode IS NOT NULL))
+      THROW 50000, 'Trying to paste shopCode', 1
+    IF (EXISTS(SELECT * FROM inserted WHERE inserted.address IN (SELECT Shop.address FROM ShopSchema.Shop)))
+      BEGIN
+        RAISERROR ('Invalid address', 10, 1)
+        ROLLBACK
+      END
+    ELSE IF (EXISTS(SELECT inserted.shopName FROM inserted WHERE inserted.shopName IN (SELECT Shop.shopName FROM ShopSchema.Shop)))
+      BEGIN
+        INSERT INTO ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
+          SELECT firstName, lastName, middleName, dateOfBirth, phone, position,
+            (SELECT shopCode FROM ShopSchema.Shop WHERE Shop.shopName = inserted.shopName) FROM inserted
+      END
+    ELSE
+      BEGIN
+        INSERT INTO ShopSchema.Shop (shopName, isOutlet, address, city) SELECT shopName, isOutlet, address, city FROM inserted
+
+        INSERT INTO ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
+          SELECT firstName, lastName, middleName, dateOfBirth, phone, position,
+            (SELECT shopCode FROM ShopSchema.Shop WHERE Shop.shopName = inserted.shopName) FROM inserted
+      END
+  END
+
+INSERT INTO ShopSchema.[Shops and Shopmans] (firstName, lastName, middleName, dateOfBirth, phone, isFired, shopName, city)
+    VALUES ('asd', 'cvb', 'asd', '1980-10-10', '89454874529', 0, 'Levi''s store Moscow MEGA Belaya Dacha', 'Moscow')
+
+CREATE TRIGGER ShopSchema.shops_and_shopmans_delete
+ON ShopSchema.[Shops and Shopmans]
+INSTEAD OF DELETE
+AS
+  DELETE FROM Shopman WHERE shopmanCode IN (SELECT shopmanCode FROM deleted)
+
+CREATE TRIGGER ShopSchema.shops_and_shopmans_update
+ON ShopSchema.[Shops and Shopmans]
+INSTEAD OF UPDATE
+AS
+  BEGIN
+    IF UPDATE(shopName)
+      RAISERROR ('Trying to update column ''shopName''', 10, 1)
+    ELSE IF (UPDATE(middleName))
+      RAISERROR ('Trying to update column ''middleName''', 10, 1)
+    IF (UPDATE(dateOfBirth))
+      RAISERROR ('Trying to update column ''dateOfBirth''', 10, 1)
+    IF (exists(SELECT inserted.position FROM inserted WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
+      THROW 50000, 'Invalid position', 1
+    ELSE
+      BEGIN
+        UPDATE Shop SET
+          isOutlet = (SELECT isOutlet FROM inserted WHERE Shop.shopCode IN (SELECT shopCode FROM inserted)),
+          address  = (SELECT address  FROM inserted WHERE Shop.shopCode IN (SELECT shopCode FROM inserted))
+        WHERE shopCode IN (SELECT shopCode FROM inserted)
+
+        UPDATE ShopSchema.Shopman SET
+          firstName  = (SELECT firstName  FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+          lastName   = (SELECT lastName   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+          middleName = (SELECT middleName FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+          phone      = (SELECT phone      FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+          position   = (SELECT position   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+          isFired    = (SELECT isFired    FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
+          shopCode   = (SELECT shopCode   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted))
+        WHERE shopmanCode IN (SELECT shopmanCode FROM inserted)
+      END
+  END
+
+SELECT * FROM sys.dm_tran_locks
