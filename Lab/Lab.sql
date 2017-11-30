@@ -66,7 +66,8 @@ CREATE TABLE ShopDB.ShopSchema.[Shopman]
     isFired BIT DEFAULT 0,
 
     shopCode INT NOT NULL,
-    FOREIGN KEY (shopCode) REFERENCES ShopDB.ShopSchema.[Shop](shopCode))
+    FOREIGN KEY (shopCode) REFERENCES ShopDB.ShopSchema.[Shop](shopCode) ON DELETE CASCADE
+)
   GO
 
 CREATE TABLE ShopDB.ShopSchema.[Check]
@@ -84,18 +85,15 @@ CREATE TABLE ShopDB.ShopSchema.[Check]
 CREATE TABLE ShopDB.ShopSchema.[Card_Subtype]
 (
   checkID INT PRIMARY KEY NOT NULL,
-  FOREIGN KEY (checkID) REFERENCES ShopDB.ShopSchema.[Check] (checkID),
+  FOREIGN KEY (checkID) REFERENCES ShopDB.ShopSchema.[Check] (checkID) ON DELETE CASCADE ,
 
   cardID INT NOT NULL,
-  FOREIGN KEY (cardID) REFERENCES ShopDB.ShopSchema.[Card] (cardID)
+  FOREIGN KEY (cardID) REFERENCES ShopDB.ShopSchema.[Card] (cardID) ON DELETE CASCADE
 )
   GO
 
 CREATE TABLE ShopDB.ShopSchema.[Card]
 (
-  checkID INT NOT NULL,
-  FOREIGN KEY (checkID) REFERENCES ShopDB.ShopSchema.[Check] (checkID),
-
   cardID INT PRIMARY KEY NOT NULL IDENTITY(0, 1),
   type BIT DEFAULT 0,
   phone CHAR(11) NOT NULL,
@@ -106,9 +104,6 @@ CREATE TABLE ShopDB.ShopSchema.[Card]
 
 CREATE TABLE ShopDB.ShopSchema.[Event]
 (
-  checkID INT,
-  FOREIGN KEY (checkID) REFERENCES ShopDB.ShopSchema.[Check] (checkID),
-
   eventID INT PRIMARY KEY NOT NULL IDENTITY(0, 1),
   description VARCHAR(500) NOT NULL,
   expDate DATE NOT NULL,
@@ -118,19 +113,21 @@ CREATE TABLE ShopDB.ShopSchema.[Event]
 CREATE TABLE ShopDB.ShopSchema.[Event_Subtype]
 (
   checkID INT PRIMARY KEY NOT NULL,
-  FOREIGN KEY (checkID) REFERENCES ShopDB.ShopSchema.[Check] (checkID),
+  FOREIGN KEY (checkID) REFERENCES ShopDB.ShopSchema.[Check] (checkID) ON DELETE CASCADE ,
 
   eventID INT NOT NULL,
-  FOREIGN KEY (eventID) REFERENCES ShopDB.ShopSchema.[Event] (eventID)
+  FOREIGN KEY (eventID) REFERENCES ShopDB.ShopSchema.[Event] (eventID) ON DELETE CASCADE
 )
-
   GO
+
 CREATE TABLE ShopDB.ShopSchema.[Item]
 (
   itemID INT PRIMARY KEY NOT NULL IDENTITY(0, 1),
   itemName VARCHAR(100) NOT NULL,
   description VARCHAR(100) NOT NULL,
   country VARCHAR(58) NOT NULL
+  --TODO триггер для связи со складом
+  --TODO в триггере проверять при удалнии, что для него нет чеков
 )
   GO
 
@@ -142,18 +139,18 @@ CREATE TABLE ShopDB.ShopSchema.[Check_Item_INT]
 
   PRIMARY KEY (checkID, itemID),
 
-  FOREIGN KEY (checkID) REFERENCES ShopDB.ShopSchema.[Check] (checkID),
-  FOREIGN KEY (itemID)  REFERENCES ShopDB.ShopSchema.[Item]  (itemID)
+  FOREIGN KEY (checkID) REFERENCES ShopDB.ShopSchema.[Check] (checkID) ON DELETE CASCADE ,
+  FOREIGN KEY (itemID)  REFERENCES ShopDB.ShopSchema.[Item]  (itemID) ON DELETE CASCADE ,
 )
   GO
 
 CREATE TABLE ShopDB.ShopSchema.[Store]
 (
   shopCode INT NOT NULL,
-  FOREIGN KEY (shopCode) REFERENCES ShopDB.ShopSchema.[Shop] (shopCode),
+  FOREIGN KEY (shopCode) REFERENCES ShopDB.ShopSchema.[Shop] (shopCode) ON DELETE CASCADE ,
 
   itemID INT NOT NULL,
-  FOREIGN KEY (itemID)  REFERENCES ShopDB.ShopSchema.[Item]  (itemID),
+  FOREIGN KEY (itemID)  REFERENCES ShopDB.ShopSchema.[Item]  (itemID) ON DELETE CASCADE ,
 
   PRIMARY KEY (shopCode, itemID),
 
@@ -747,23 +744,17 @@ AS
       THROW 50000, 'Trying to paste shopCode', 1
     IF (EXISTS(SELECT * FROM inserted WHERE inserted.address IN (SELECT Shop.address FROM ShopSchema.Shop)))
       BEGIN
-        RAISERROR ('Invalid address', 10, 1)
-        ROLLBACK
+        RAISERROR ('Invalid address, such shop is existed', 10, 1)
       END
-    ELSE IF (EXISTS(SELECT inserted.shopName FROM inserted WHERE inserted.shopName IN (SELECT Shop.shopName FROM ShopSchema.Shop)))
-      BEGIN
-        INSERT INTO ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
-          SELECT firstName, lastName, middleName, dateOfBirth, phone, position,
-            (SELECT shopCode FROM ShopSchema.Shop WHERE Shop.shopName = inserted.shopName) FROM inserted
-      END
-    ELSE
-      BEGIN
-        INSERT INTO ShopSchema.Shop (shopName, isOutlet, address, city) SELECT shopName, isOutlet, address, city FROM inserted
+    ELSE BEGIN
 
-        INSERT INTO ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
-          SELECT firstName, lastName, middleName, dateOfBirth, phone, position,
-            (SELECT shopCode FROM ShopSchema.Shop WHERE Shop.shopName = inserted.shopName) FROM inserted
-      END
+      MERGE ShopSchema.Shop USING inserted ON (Shop.shopName = inserted.shopName)
+        WHEN NOT MATCHED BY TARGET THEN INSERT (shopName, isOutlet, address) VALUES (inserted.shopName, inserted.isOutlet, inserted.address);
+
+      INSERT INTO ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
+        SELECT firstName, lastName, middleName, dateOfBirth, phone, position,
+        (SELECT shopCode FROM ShopSchema.Shop WHERE Shop.shopName = inserted.shopName) FROM inserted
+    END
   END
 
 INSERT INTO ShopSchema.[Shops and Shopmans] (firstName, lastName, middleName, dateOfBirth, phone, isFired, shopName, city)
@@ -808,3 +799,63 @@ AS
   END
 
 SELECT * FROM sys.dm_tran_locks
+GO
+
+--========--
+--Lab11--
+--========--
+CREATE TRIGGER ShopSchema.tr_insert_check_item_int
+ON ShopSchema.Check_Item_INT
+AFTER INSERT
+AS
+  BEGIN
+    SELECT Shop.shopCode FROM (SELECT [Check].checkID, shopmanCode FROM [Check] WHERE [Check].checkID IN (SELECT checkID FROM inserted)) AS C
+    JOIN Shopman ON C.shopmanCode = Shopman.shopmanCode
+    JOIN Shop ON Shopman.shopCode = Shop.shopCode
+
+    UPDATE Store SET rest = rest - 1 WHERE shopCode IN (SELECT Shop.shopCode FROM (SELECT [Check].checkID, shopmanCode FROM [Check] WHERE [Check].checkID IN (SELECT checkID FROM inserted)) AS C
+    JOIN Shopman ON C.shopmanCode = Shopman.shopmanCode
+    JOIN Shop ON Shopman.shopCode = Shop.shopCode) AND itemID IN (SELECT itemID FROM inserted)
+  END
+GO
+
+CREATE TRIGGER ShopSchema.tr_insert_items_in_check
+ON ShopSchema.Items_in_check
+INSTEAD OF INSERT
+AS
+  BEGIN
+    MERGE INTO ShopSchema.[Check] USING inserted ON (inserted.date = [Check].date AND inserted.totalCost = [Check].totalCost)
+      WHEN NOT MATCHED BY TARGET THEN INSERT (date, totalCost, typeOfPay, discount, shopmanCode)
+      VALUES (inserted.date, inserted.totalCost, inserted.typeOfPay, inserted.discount, inserted.shopmanCode);
+
+    INSERT INTO ShopSchema.Check_Item_INT (checkID, itemID) SELECT (SELECT checkID
+                                                                    FROM ShopSchema.[Check]
+                                                                    WHERE ([Check].date = inserted.date AND
+                                                                          [Check].totalCost = inserted.totalCost)),
+                                                              itemID FROM inserted
+  END
+GO
+
+CREATE VIEW ShopSchema.Items_Store WITH SCHEMABINDING
+AS
+SELECT Item.itemID, itemName, description, country, rest, price, shopCode FROM ShopSchema.Item JOIN ShopSchema.Store ON Item.itemID = Store.itemID
+GO
+
+CREATE TRIGGER ShopSchema.tr_insert_items_store
+ON ShopSchema.Items_Store
+INSTEAD OF INSERT
+AS
+  BEGIN
+    MERGE INTO ShopSchema.Item USING inserted ON (inserted.itemName = Item.itemName)
+      WHEN NOT MATCHED BY TARGET THEN INSERT (itemName, description, country)
+      VALUES (inserted.itemName, inserted.description, inserted.country);
+
+    MERGE INTO ShopSchema.Store USING inserted ON (inserted.itemID = Store.itemID AND inserted.shopCode = Store.shopCode)
+      WHEN NOT MATCHED BY TARGET THEN INSERT (rest, price) VALUES (inserted.rest, inserted.price)
+      WHEN MATCHED THEN UPDATE SET Store.rest = Store.rest + inserted.rest;
+
+  END
+
+
+SELECT * FROM ShopSchema.[Check] WHERE (4500, 0 NOT IN (SELECT totalCost, shopmanCode FROM [Check]))
+
