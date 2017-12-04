@@ -686,6 +686,9 @@ CREATE TRIGGER ShopSchema.shopman_insert
 ON ShopSchema.Shopman
 INSTEAD OF INSERT
 AS
+  BEGIN
+  IF (exists(SELECT phone FROM inserted GROUP BY phone HAVING COUNT(phone) > 1))
+      THROW 50000, 'Trying to insert same phone numbers', 1
   IF (exists(SELECT inserted.position FROM inserted WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
         THROW 50000, 'Invalid position', 1
   ELSE IF (exists(SELECT * FROM inserted WHERE inserted.phone IN (SELECT phone FROM ShopSchema.Shopman)))
@@ -693,6 +696,7 @@ AS
   ELSE
     INSERT INTO ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode)
       SELECT inserted.firstName, inserted.lastName, inserted.middleName, inserted.dateOfBirth, inserted.phone, inserted.position, inserted.shopCode FROM inserted
+ END
 GO
 INSERT ShopSchema.Shopman (firstName, lastName, middleName, dateOfBirth, phone, position, shopCode) VALUES ('a', 'b', 'c', '1993-01-01', '89164472638', 'bellboy', 0)
 GO
@@ -711,16 +715,22 @@ AS
 
     ELSE IF (NOT UPDATE(middleName) AND NOT UPDATE(dateOfBirth))
       UPDATE ShopSchema.Shopman SET
-        firstName  = (SELECT firstName  FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-        lastName   = (SELECT lastName   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-        middleName = (SELECT middleName FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-        phone      = (SELECT phone      FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-        position   = (SELECT position   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-        isFired    = (SELECT isFired    FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-        shopCode   = (SELECT shopCode   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted))
-      WHERE shopmanCode IN (SELECT shopmanCode FROM inserted)
+        firstName  = inserted.firstName,
+        lastName   = inserted.lastName,
+        middleName = inserted.middleName,
+        phone      = inserted.phone,
+        position   = inserted.position,
+        isFired    = inserted.isFired,
+        shopCode   = inserted.shopCode
+     FROM inserted
+      WHERE Shopman.shopmanCode = inserted.shopmanCode
   END
 GO
+
+select * from ShopSchema.Shopman
+UPDATE ShopSchema.Shopman SET firstName = 'alex' WHERE shopmanCode = 0
+select * from ShopSchema.Shopman
+
 UPDATE ShopSchema.Shopman SET position = 'администрато' WHERE position = 'администратор'
 GO
 
@@ -742,10 +752,6 @@ AS
     --вставка только по shopName
     IF (EXISTS(SELECT * FROM inserted WHERE shopCode IS NOT NULL))
       THROW 50000, 'Trying to paste shopCode', 1
-    IF (EXISTS(SELECT * FROM inserted WHERE inserted.address IN (SELECT Shop.address FROM ShopSchema.Shop)))
-      BEGIN
-        RAISERROR ('Invalid address, such shop is existed', 10, 1)
-      END
     ELSE BEGIN
 
       MERGE ShopSchema.Shop USING inserted ON (Shop.shopName = inserted.shopName)
@@ -758,7 +764,7 @@ AS
   END
 
 INSERT INTO ShopSchema.[Shops and Shopmans] (firstName, lastName, middleName, dateOfBirth, phone, isFired, shopName, city)
-    VALUES ('asd', 'cvb', 'asd', '1980-10-10', '89454874529', 0, 'Levi''s store Moscow MEGA Belaya Dacha', 'Moscow')
+    VALUES ('asd', 'cvb', 'asd', '1980-10-10', '89548774629', 0, 'Levi''s store Moscow MEGA Belaya Dacha', 'Moscow')
 
 CREATE TRIGGER ShopSchema.shops_and_shopmans_delete
 ON ShopSchema.[Shops and Shopmans]
@@ -772,29 +778,31 @@ INSTEAD OF UPDATE
 AS
   BEGIN
     IF UPDATE(shopName)
-      RAISERROR ('Trying to update column ''shopName''', 10, 1)
+      THROW 50000, 'Trying to update column ''shopName''', 1
     ELSE IF (UPDATE(middleName))
-      RAISERROR ('Trying to update column ''middleName''', 10, 1)
+      THROW 50000, 'Trying to update column ''middleName''', 1
     IF (UPDATE(dateOfBirth))
-      RAISERROR ('Trying to update column ''dateOfBirth''', 10, 1)
+      THROW 50000, 'Trying to update column ''dateOfBirth''', 1
     IF (exists(SELECT inserted.position FROM inserted WHERE inserted.position NOT IN ('уборщик', 'администратор', 'продавец-консультант', 'старший продавец')))
       THROW 50000, 'Invalid position', 1
     ELSE
       BEGIN
         UPDATE Shop SET
-          isOutlet = (SELECT isOutlet FROM inserted WHERE Shop.shopCode IN (SELECT shopCode FROM inserted)),
-          address  = (SELECT address  FROM inserted WHERE Shop.shopCode IN (SELECT shopCode FROM inserted))
-        WHERE shopCode IN (SELECT shopCode FROM inserted)
+          isOutlet = inserted.isOutlet,
+          address  = inserted.address
+        FROM inserted
+        WHERE Shop.shopCode = inserted.shopCode
 
         UPDATE ShopSchema.Shopman SET
-          firstName  = (SELECT firstName  FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-          lastName   = (SELECT lastName   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-          middleName = (SELECT middleName FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-          phone      = (SELECT phone      FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-          position   = (SELECT position   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-          isFired    = (SELECT isFired    FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted)),
-          shopCode   = (SELECT shopCode   FROM inserted WHERE Shopman.shopmanCode IN (SELECT shopmanCode FROM inserted))
-        WHERE shopmanCode IN (SELECT shopmanCode FROM inserted)
+          firstName  = inserted.firstName,
+          lastName   = inserted.lastName,
+          middleName = inserted.middleName,
+          phone      = inserted.phone,
+          position   = inserted.position,
+          isFired    = inserted.isFired,
+          shopCode   = inserted.shopCode
+        FROM inserted
+        WHERE Shopman.shopmanCode = inserted.shopmanCode
       END
   END
 
@@ -859,3 +867,10 @@ AS
 
 SELECT * FROM ShopSchema.[Check] WHERE (4500, 0 NOT IN (SELECT totalCost, shopmanCode FROM [Check]))
 
+CREATE TRIGGER ShopSchema.tr_delete_shop
+ON ShopSchema.Shop
+AFTER DELETE
+AS
+  BEGIN
+    DELETE FROM Shopman WHERE Shopman.shopCode IN (SELECT shopmanCode FROM deleted)
+  END
