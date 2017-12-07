@@ -35,7 +35,7 @@ CREATE SCHEMA ShopSchema;
 CREATE TABLE ShopDB.ShopSchema.[Shop]
 (
     shopCode INT PRIMARY KEY NOT NULL IDENTITY(0, 1),
-    shopName VARCHAR(100),
+    shopName VARCHAR(100) UNIQUE,
     isOutlet BIT DEFAULT 0 NOT NULL,
     address  VARCHAR(100)   NOT NULL,
     city VARCHAR(50) NOT NULL
@@ -61,7 +61,7 @@ CREATE TABLE ShopDB.ShopSchema.[Shopman]
     lastName VARCHAR(25) NOT NULL,
     middleName VARCHAR(25),
     dateOfBirth DATE NOT NULL CHECK (ShopSchema.calculateAge(dateOfBirth) >= 18),
-    phone CHAR(11) NOT NULL,
+    phone CHAR(11) NOT NULL UNIQUE,
     position VARCHAR(25),
     isFired BIT DEFAULT 0,
 
@@ -78,6 +78,7 @@ CREATE TABLE ShopDB.ShopSchema.[Check]
     typeOfPay BIT NOT NULL,
     discount SMALLINT DEFAULT 0,
     shopmanCode INT NOT NULL,
+    UNIQUE (date, totalCost),
     FOREIGN KEY (shopmanCode) REFERENCES ShopDB.ShopSchema.[Shopman] (shopmanCode)
 )
   GO
@@ -88,7 +89,7 @@ CREATE TABLE ShopDB.ShopSchema.[Card_Subtype]
   FOREIGN KEY (checkID) REFERENCES ShopDB.ShopSchema.[Check] (checkID) ON DELETE CASCADE ,
 
   cardID INT NOT NULL,
-  FOREIGN KEY (cardID) REFERENCES ShopDB.ShopSchema.[Card] (cardID) ON DELETE CASCADE
+  FOREIGN KEY (cardID) REFERENCES ShopDB.ShopSchema.[Card] (cardID)
 )
   GO
 
@@ -96,7 +97,7 @@ CREATE TABLE ShopDB.ShopSchema.[Card]
 (
   cardID INT PRIMARY KEY NOT NULL IDENTITY(0, 1),
   type BIT DEFAULT 0,
-  phone CHAR(11) NOT NULL,
+  phone CHAR(11) NOT NULL UNIQUE,
   firstName VARCHAR(25) NOT NULL,
   lastName VARCHAR(25) NOT NULL,
 )
@@ -116,14 +117,14 @@ CREATE TABLE ShopDB.ShopSchema.[Event_Subtype]
   FOREIGN KEY (checkID) REFERENCES ShopDB.ShopSchema.[Check] (checkID) ON DELETE CASCADE ,
 
   eventID INT NOT NULL,
-  FOREIGN KEY (eventID) REFERENCES ShopDB.ShopSchema.[Event] (eventID) ON DELETE CASCADE
+  FOREIGN KEY (eventID) REFERENCES ShopDB.ShopSchema.[Event] (eventID)
 )
   GO
 
 CREATE TABLE ShopDB.ShopSchema.[Item]
 (
   itemID INT PRIMARY KEY NOT NULL IDENTITY(0, 1),
-  itemName VARCHAR(100) NOT NULL,
+  itemName VARCHAR(100) NOT NULL UNIQUE,
   description VARCHAR(100) NOT NULL,
   country VARCHAR(58) NOT NULL
   --TODO триггер для связи со складом
@@ -140,7 +141,7 @@ CREATE TABLE ShopDB.ShopSchema.[Check_Item_INT]
   PRIMARY KEY (checkID, itemID),
 
   FOREIGN KEY (checkID) REFERENCES ShopDB.ShopSchema.[Check] (checkID) ON DELETE CASCADE ,
-  FOREIGN KEY (itemID)  REFERENCES ShopDB.ShopSchema.[Item]  (itemID) ON DELETE CASCADE ,
+  FOREIGN KEY (itemID)  REFERENCES ShopDB.ShopSchema.[Item]  (itemID),
 )
   GO
 
@@ -154,8 +155,8 @@ CREATE TABLE ShopDB.ShopSchema.[Store]
 
   PRIMARY KEY (shopCode, itemID),
 
-  rest INT NOT NULL,
-  price MONEY NOT NULL
+  rest INT NOT NULL CHECK (rest >= 0),
+  price MONEY NOT NULL CHECK (price > 0)
 )
   GO
 
@@ -429,76 +430,6 @@ FROM ShopSchema.[Check] AS C
   JOIN ShopSchema.Store AS S ON I.itemID = S.itemID AND ShopSchema.search_shopCode_by_shopmanCode(C.shopmanCode) = S.shopCode
 GO
 
-CREATE TRIGGER ShopSchema.admins_insert
-ON ShopSchema.Admins
-INSTEAD OF INSERT
-AS
-  BEGIN
-    INSERT INTO ShopSchema.Shopman SELECT inserted.firstName, inserted.lastName, inserted.middleName,
-                                     inserted.dateOfBirth, inserted.phone, 'администратор' AS position, 0 AS isFired,
-                                     (SELECT Shop.shopCode FROM Shop WHERE Shop.shopName = inserted.shopName)
-                                   FROM inserted
-  END
-GO
-
-INSERT INTO ShopSchema.Admins (firstName, lastName, middleName, dateOfBirth, phone, isFired, shopName)
-    VALUES ('asd', 'cvb', 'asd', '1980-10-10', '89454874529', 0, 'Levi''s store Moscow MEGA Belaya Dacha')
-GO
-
-CREATE TRIGGER ShopSchema.admins_update
-ON ShopSchema.Admins
-INSTEAD OF UPDATE
-AS
-  BEGIN
-    DECLARE @shopmanCode INT
-    DECLARE @phone       CHAR(11)
-    DECLARE @isFired     BIT
-    DECLARE @shopCode    INT
-    DECLARE @firstName   VARCHAR(25)
-    DECLARE @lastName    VARCHAR(25)
-
-    DECLARE @admins_cursor CURSOR
-
-    SET @admins_cursor = CURSOR FORWARD_ONLY
-                         STATIC
-    FOR SELECT inserted.shopmanCode, inserted.firstName, inserted.lastName, inserted.phone, inserted.isFired, inserted.shopCode FROM inserted
-    OPEN @admins_cursor
-
-    FETCH NEXT FROM @admins_cursor INTO @shopmanCode, @firstName, @lastName, @phone, @isFired, @shopCode
-
-    WHILE (@@FETCH_STATUS = 0)
-    BEGIN
-      IF UPDATE(shopName)
-        BEGIN
-          RAISERROR ('''ShopName'' column are tried to update', 10, 1)
-          ROLLBACK
-        END
-      ELSE
-        BEGIN
-          UPDATE ShopSchema.Shopman SET
-            firstName = @firstName,
-            lastName = @lastName,
-            phone = @phone,
-            isFired = @isFired,
-            shopCode = @shopCode
-          WHERE ShopSchema.Shopman.shopmanCode = @shopmanCode
-        END
-      FETCH NEXT FROM @admins_cursor INTO @shopmanCode, @firstName, @lastName, @phone, @isFired, @shopCode
-    END
-  END
-GO
-
-UPDATE ShopSchema.Admins SET phone = '89253577755' WHERE shopmanCode = 6
-GO
-
-CREATE TRIGGER ShopSchema.admins_delete
-ON ShopSchema.Admins
-INSTEAD OF DELETE
-AS
-  DELETE FROM Shopman WHERE Shopman.shopmanCode IN (SELECT deleted.shopmanCode FROM deleted)
-GO
-
-DELETE FROM ShopSchema.Admins WHERE firstName = 'asd'
 
 CREATE VIEW ShopSchema.[Checks_with_cards_and_items] WITH SCHEMABINDING
 AS
@@ -508,48 +439,6 @@ SELECT C.checkID, C.date, C.totalCost, C.typeOfPay, C.discount, C.shopmanCode,
 JOIN ShopSchema.Card_Subtype AS S ON C.checkID = S.checkID
 JOIN ShopSchema.Card AS CD ON CD.cardID = S.cardID
 JOIN ShopSchema.Items_in_check AS IT ON IT.checkID = C.checkID
-GO
-
-CREATE TRIGGER ShopSchema.card_insert
-ON ShopSchema.Card
-INSTEAD OF INSERT
-AS
-  IF (EXISTS(SELECT * FROM inserted WHERE phone NOT LIKE '8%'))
-      BEGIN
-        SELECT * FROM inserted WHERE phone NOT LIKE '8%';
-        THROW 50000, 'Invalid phone', 1
-      END
-  ELSE
-    INSERT INTO ShopSchema.Card (type, phone, firstName, lastName) SELECT inserted.type, inserted.phone, inserted.firstName, inserted.lastName FROM inserted
-GO
-
-INSERT INTO ShopSchema.Card (type, phone, firstName, lastName) VALUES (0, '99854486356', 'a', 'b')
-
-CREATE TRIGGER ShopSchema.card_delete
-ON ShopSchema.Card
-INSTEAD OF DELETE
-AS
-  IF (NOT EXISTS(SELECT * FROM deleted
-    JOIN ShopSchema.Card_Subtype ON deleted.cardID = Card_Subtype.cardID
-    JOIN ShopSchema.[Check] ON Card_Subtype.checkID = [Check].checkID
-    WHERE ShopSchema.calculateAge([Check].date) > 1))
-      THROW 50000, 'There are checks, that are dated less than year ago', -1
-  ELSE
-    DELETE FROM Card WHERE cardID IN (SELECT deleted.cardID FROM deleted)
-GO
-
-CREATE TRIGGER ShopSchema.card_update
-ON ShopSchema.Card
-AFTER UPDATE
-AS
-  IF UPDATE(type) OR UPDATE(cardID)
-      BEGIN
-        RAISERROR('Columns type or cardID are tried to update', 10, 1)
-        ROLLBACK
-      END
-GO
-
-UPDATE ShopSchema.Card SET type = 0 WHERE cardID = 0
 GO
 
 CREATE TRIGGER ShopSchema.tr_insert
@@ -727,10 +616,6 @@ AS
   END
 GO
 
-select * from ShopSchema.Shopman
-UPDATE ShopSchema.Shopman SET firstName = 'alex' WHERE shopmanCode = 0
-select * from ShopSchema.Shopman
-
 UPDATE ShopSchema.Shopman SET position = 'администрато' WHERE position = 'администратор'
 GO
 
@@ -805,9 +690,6 @@ AS
         WHERE Shopman.shopmanCode = inserted.shopmanCode
       END
   END
-
-SELECT * FROM sys.dm_tran_locks
-GO
 
 --========--
 --Lab11--
